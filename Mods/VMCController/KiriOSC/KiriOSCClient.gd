@@ -1,12 +1,24 @@
+extends Node
+class_name KiriOSClient
+
 var udp_peer : PacketPeerUDP = null
 
 @export var target_ip : String = "127.0.0.1"
 @export var target_port : int = 39539
-@export var auto_start : bool = true
+@export var auto_start : bool = false
 
 func _ready():
 	if auto_start:
 		start_client()
+
+## Change the target port and IP address and restart the underlying connection.
+func change_port_and_ip(port: int, ip: String) -> void:
+	if target_ip != ip or target_port != port:
+		target_ip = ip
+		target_port = port
+		if is_client_active():
+			stop_client()
+			start_client()
 
 ## Connect to host.
 func start_client() -> void:
@@ -46,7 +58,7 @@ func prepare_osc_message_auto_type_tag(address: String, arguments: Array) -> Pac
 			TYPE_PACKED_BYTE_ARRAY:
 				types += "b"
 			_:
-				push_error("Unsupported type from automatic type tagging: " % type_string(typeof(arg)))
+				push_error("Unsupported type from automatic type tagging: %s" % type_string(typeof(arg)))
 	return prepare_osc_message(address, types, arguments)
 
 ## Prepares but does not send an OSC message given the supplied address, types and arguments for those types.
@@ -91,7 +103,7 @@ func prepare_osc_message(address: String, types: String, arguments: Array) -> Pa
 				pass
 			_:
 				# We do not continue execution. An unsupported type is fatal.
-				assert(false, "Unsupported type: " % type)
+				assert(false, "Unsupported type: %s" % type)
 	return packet
 
 ## Prepares and sends an OSC message given the address, types and arguments.
@@ -107,10 +119,10 @@ func send_osc_message_raw(packet: PackedByteArray) -> void:
 		
 	udp_peer.put_packet(packet)
 	
-## Allows for bundling to occur using the array of provided OSC messages.
+## Creates a bundle using the array of provided OSC messages.
 ## Creation of these message packets can occur through the use of the prepare_osc_message 
 ## or equivalent function.
-func create_osc_bundle(timetag: int, osc_element_packets: Array[PackedByteArray]) -> PackedByteArray:
+func create_osc_bundle(timetag: int, osc_element_packets: Array) -> PackedByteArray:
 	var packet = PackedByteArray()
 
 	packet.append_array(_osc_string("#bundle"))
@@ -131,6 +143,7 @@ func _osc_string(s: String) -> PackedByteArray:
 	var packet = PackedByteArray()
 
 	# Technically the OSC specs state "non-null ASCII characters followed by null", but we use utf8.
+	# This is due to the comm format in VMC: "Use UTF-8. (Data includes non ascii type)"
 	packet.append_array(s.to_utf8_buffer())
 	packet.append(0)
 
@@ -153,7 +166,7 @@ func _osc_midi(port_id: int, status: int, data1: int, data2: int) -> PackedByteA
 	packet[2] = data1 >> 0 & 0xFF
 	packet[3] = data2 >> 0 & 0xFF
 	return packet
-	
+
 func _osc_int(value: int) -> PackedByteArray:
 	var packet = PackedByteArray()
 	packet.resize(4)
@@ -162,7 +175,7 @@ func _osc_int(value: int) -> PackedByteArray:
 	packet[2] = (value >> 8) & 0xFF
 	packet[3] = (value >> 0) & 0xFF
 	return packet
-	
+
 func _osc_int64(value: int) -> PackedByteArray:
 	var packet = PackedByteArray()
 	packet.resize(8)

@@ -3,16 +3,34 @@ extends Mod_Base
 var bind_ip_address : String = "127.0.0.1"
 var bind_port : int = 39570
 var vmc_receiver_enabled : bool = false
-
+var client_ip_address : String = "127.0.0.2"
+var client_port : int = 39539
+var vmc_sender_enabled : bool = false
+var client_send_rate_limit_ms : int = 50
+var client_vmc_protocl_version_setting : Array
+var curr_client_send_time : float
 
 var blend_shape_last_values = {}
 var overridden_blend_shape_values = {} # FIXME: Make this more general-purpose
 
-
 func _ready():
-	add_tracked_setting("bind_ip_address", "Receiver IP address")
-	add_tracked_setting("bind_port", "Receiver port")
-	add_tracked_setting("vmc_receiver_enabled", "Receiver enabled")
+	add_setting_group("vmc_receiving", "VMC Receiving")
+	add_setting_group("vmc_sending", "VMC Sending")
+	
+	add_tracked_setting("bind_ip_address", "Receiver IP address", {}, "vmc_receiving")
+	add_tracked_setting("bind_port", "Receiver port", {}, "vmc_receiving")
+	add_tracked_setting("vmc_receiver_enabled", "Receiver enabled", {}, "vmc_receiving")
+	
+	add_tracked_setting("client_ip_address", "Sender IP address", {}, "vmc_sending")
+	add_tracked_setting("client_port", "Sender port", {}, "vmc_sending")
+	add_tracked_setting("client_send_rate_limit_ms", "Send rate (ms)", {}, "vmc_sending")
+	add_tracked_setting("client_vmc_protocl_version_setting", "VMC Protocol Version", { 
+			"allow_multiple": false, 
+			"combobox": true, 
+			"values": ["v2.3-2.7", "v2.8"]
+		}, "vmc_sending")
+	add_tracked_setting("vmc_sender_enabled", "Sender enabled", {}, "vmc_sending")
+	
 	update_settings_ui()
 
 func load_after(_settings_old : Dictionary, _settings_new : Dictionary):
@@ -22,6 +40,12 @@ func load_after(_settings_old : Dictionary, _settings_new : Dictionary):
 			$KiriOSCServer.start_server()
 		else:
 			$KiriOSCServer.stop_server()
+	$KiriOSCClient.change_port_and_ip(client_port, client_ip_address)
+	if _settings_old["vmc_sender_enabled"] != _settings_new["vmc_sender_enabled"]:
+		if vmc_sender_enabled:
+			$KiriOSCClient.start_client()
+		else:
+			$KiriOSCClient.stop_client()
 
 func scene_shutdown() -> void:
 	get_app().get_controller().reset_skeleton_to_rest_pose()
@@ -223,3 +247,123 @@ func _on_OSCServer_message_received(address_string, arguments):
 						object_to_animate.set(
 							"blend_shapes/" + anim_path_max_value_key.get_subname(0),
 							anim_path_maximums[anim_path_max_value_key])
+
+func _process(delta: float) -> void:
+	
+	# Process sending of VMC data.
+	if vmc_sender_enabled:
+		curr_client_send_time += delta
+		if curr_client_send_time > client_send_rate_limit_ms / 1000:
+			curr_client_send_time = 0
+			_handle_vmc_sending()
+		
+func _handle_vmc_sending() -> void:
+	print_log("Sending VMC Data")
+	
+	var model : Node3D = get_app().get_model()
+	var skeleton : Skeleton3D = get_app().get_skeleton()
+	var model_controller : ModelController = get_app().get_node("ModelController")
+	
+	# Send root transform
+	# 2.1 introduced s and o.
+	# /VMC/Ext/Root/Pos (string){name} (float){p.x} (float){p.y} (float){p.z} (float){q.x} (float){q.y} (float){q.z} (float){q.w} (float){s.x} (float){s.y} (float){s.z} (float){o.x} (float){o.y} (float){o.z}  
+	# p=Position
+	# q=Quaternion
+	# s=MR Scale
+	# o=MR Offset
+	# We bundle root packet with the bone transforms.
+	var root_packet = _prepare_vmc_packet_for_bone("/VMC/Ext/Root/Pos", "root", 
+													model, skeleton, model_controller)
+	if root_packet[0] == false:
+		push_error("Root packet was not built.")
+		root_packet = PackedByteArray([])
+	
+	# Send bone transforms
+	# /VMC/Ext/Bone/Pos (string){name} (float){p.x} (float){p.y} (float){p.z} (float){q.x} (float){q.y} (float){q.z} (float){q.w}  
+	# p = position
+	# q = quaternion
+	var bundle_packet = _prepare_bone_hierarchy_bundle([root_packet], model, skeleton, model_controller)
+	$KiriOSCClient.send_osc_message_raw(bundle_packet)
+
+	# Send blend values, THEN send blend apply.
+	# /VMC/Ext/Blend/Val (string){name} (float){value}  
+	# /VMC/Ext/Blend/Apply
+	
+	# Send camera transform & FOV
+	# /VMC/Ext/Cam (string){name} (float){p.x} (float){p.y} (float){p.z} (float){q.x} (float){q.y} (float){q.z} (float){q.w} (float){fov} 
+	
+	# Send eye tracking target position
+	# /VMC/Ext/Set/Eye (int){enable} (float){p.x} (float){p.y} (float){p.z}
+	# v2.3-2.7 = ABSOLUTE position.
+	# v2.8 = Head RELATIVE position.
+	
+func _prepare_bone_hierarchy_bundle(additional_packets: Array[PackedByteArray], model: Node3D, skeleton: Skeleton3D, model_controller: ModelController) -> PackedByteArray:
+	var bone_count = skeleton.get_bone_count()
+	var stack = []
+	var packets = []
+	
+	for additional_packet in additional_packets:
+		if len(additional_packet) > 0:
+			packets.append(additional_packet)
+	
+	# Initialize the stack with all root bones (bones with no parent)
+	for i in range(bone_count):
+		if skeleton.get_bone_parent(i) == -1:
+			stack.append(i)  # (bone_index, indent_level)
+	
+	while stack.size() > 0:
+		var bone_index = stack.pop_back()
+		var bone_name = skeleton.get_bone_name(bone_index)
+
+		var children = skeleton.get_bone_children(bone_index)
+		for child in children:
+			stack.append(child)
+		
+		# Skip processing root packet.
+		if bone_name.begins_with("root") or bone_name.begins_with("Root"):
+			continue
+		
+		var packet_res = _prepare_vmc_packet_for_bone("/VMC/Ext/Bone/Pos", bone_name, model, skeleton, model_controller)
+		if not packet_res[0]:
+			print("Cannot find Bone: %s %d", [bone_name, bone_index])
+		else:
+			packets.append(packet_res[1])
+			
+	# Return the prepared bundle.
+	return $KiriOSCClient.create_osc_bundle(0, packets)	
+	
+func _prepare_vmc_packet_for_bone(address: String, bone_name: String, 
+									model: Node3D, skeleton: Skeleton3D, 
+									model_controller: ModelController) -> Array:
+	
+	if bone_name == "root":
+		var pos = model.position
+		var quat = model.transform.basis.get_rotation_quaternion()
+		var scale = model.transform.basis.get_scale()
+		return [
+			true, 
+			$KiriOSCClient.prepare_osc_message(address, "sfffffffffffff", 
+			[
+				bone_name, 
+				pos.x, pos.y, pos.z,
+				quat.x, quat.y, quat.z, quat.w,
+				scale.x, scale.y, scale.z,
+				0, 0, 0 # FIXME: Model root offset!
+			])
+		]
+	else:
+		var bone_trans = model_controller.get_bone_transform(bone_name)
+		if bone_trans == null:
+			return [false, null]
+		var trans: Vector3 = bone_trans.origin
+		var quat: Quaternion = bone_trans.basis.get_rotation_quaternion()
+		return [
+			true,
+			$KiriOSCClient.prepare_osc_message(address, "sfffffff",
+			[
+				bone_name,
+				trans.x, trans.y, trans.z,
+				quat.x, quat.y, quat.z, quat.w
+			])
+		]
+		

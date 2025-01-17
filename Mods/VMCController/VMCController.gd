@@ -6,14 +6,78 @@ var vmc_receiver_enabled : bool = false
 var client_ip_address : String = "127.0.0.2"
 var client_port : int = 39539
 var vmc_sender_enabled : bool = false
+var vmc_send_mirrored_arms : bool = false
 var client_send_rate_limit_ms : int = 50
 var client_vmc_protocl_version_setting : Array
 var curr_client_send_time : float
+var ntp_start_date : Dictionary
+var ntp_start_unix : int
 
 var blend_shape_last_values = {}
 var overridden_blend_shape_values = {} # FIXME: Make this more general-purpose
 
+var joint_names = [
+	"Hips",
+	"Spine",
+	"Chest",
+	"UpperChest",
+	"Neck",
+	"Head",
+	"LeftEye",
+	"RightEye",
+	"Jaw",
+	"LeftUpperLeg",
+	"LeftLowerLeg",
+	"LeftFoot",
+	"LeftToes",
+	"RightUpperLeg",
+	"RightLowerLeg",
+	"RightFoot",
+	"RightToes",
+	"LeftShoulder",
+	"LeftUpperArm",
+	"LeftLowerArm",
+	"LeftHand",
+	"RightShoulder",
+	"RightUpperArm",
+	"RightLowerArm",
+	"RightHand",
+	"LeftThumbProximal",
+	"LeftThumbIntermediate",
+	"LeftThumbDistal",
+	"LeftIndexProximal",
+	"LeftIndexIntermediate",
+	"LeftIndexDistal",
+	"LeftMiddleProximal",
+	"LeftMiddleIntermediate",
+	"LeftMiddleDistal",
+	"LeftRingProximal",
+	"LeftRingIntermediate",
+	"LeftRingDistal",
+	"LeftLittleProximal",
+	"LeftLittleIntermediate",
+	"LeftLittleDistal",
+	"RightThumbProximal",
+	"RightThumbIntermediate",
+	"RightThumbDistal",
+	"RightIndexProximal",
+	"RightIndexIntermediate",
+	"RightIndexDistal",
+	"RightMiddleProximal",
+	"RightMiddleIntermediate",
+	"RightMiddleDistal",
+	"RightRingProximal",
+	"RightRingIntermediate",
+	"RightRingDistal",
+	"RightLittleProximal",
+	"RightLittleIntermediate",
+	"RightLittleDistal"
+]
+
 func _ready():
+	ntp_start_date = Time.get_datetime_dict_from_datetime_string("1900-01-01T00:00:00Z", false)
+	ntp_start_unix = Time.get_unix_time_from_datetime_dict(ntp_start_date)
+	
 	add_setting_group("vmc_receiving", "VMC Receiving")
 	add_setting_group("vmc_sending", "VMC Sending")
 	
@@ -29,6 +93,7 @@ func _ready():
 			"combobox": true, 
 			"values": ["v2.3-2.7", "v2.8"]
 		}, "vmc_sending")
+	add_tracked_setting("vmc_send_mirrored_arms", "Send mirrored arms", {}, "vmc_sending")
 	add_tracked_setting("vmc_sender_enabled", "Sender enabled", {}, "vmc_sending")
 	
 	update_settings_ui()
@@ -258,7 +323,7 @@ func _process(delta: float) -> void:
 			_handle_vmc_sending()
 		
 func _handle_vmc_sending() -> void:
-	print_log("Sending VMC Data")
+	#print_log("Sending VMC Data")
 	
 	var model : Node3D = get_app().get_model()
 	var skeleton : Skeleton3D = get_app().get_skeleton()
@@ -271,18 +336,11 @@ func _handle_vmc_sending() -> void:
 	# q=Quaternion
 	# s=MR Scale
 	# o=MR Offset
-	# We bundle root packet with the bone transforms.
-	var root_packet = _prepare_vmc_packet_for_bone("/VMC/Ext/Root/Pos", "root", 
-													model, skeleton, model_controller)
-	if root_packet[0] == false:
-		push_error("Root packet was not built.")
-		root_packet = PackedByteArray([])
-	
 	# Send bone transforms
 	# /VMC/Ext/Bone/Pos (string){name} (float){p.x} (float){p.y} (float){p.z} (float){q.x} (float){q.y} (float){q.z} (float){q.w}  
 	# p = position
 	# q = quaternion
-	var bundle_packet = _prepare_bone_hierarchy_bundle([root_packet], model, skeleton, model_controller)
+	var bundle_packet = _prepare_bone_hierarchy_bundle(model, skeleton, model_controller)
 	$KiriOSCClient.send_osc_message_raw(bundle_packet)
 
 	# Send blend values, THEN send blend apply.
@@ -296,20 +354,24 @@ func _handle_vmc_sending() -> void:
 	# /VMC/Ext/Set/Eye (int){enable} (float){p.x} (float){p.y} (float){p.z}
 	# v2.3-2.7 = ABSOLUTE position.
 	# v2.8 = Head RELATIVE position.
+	$KiriOSCClient.send_osc_message("/VMC/Ext/OK", "i", [1])
+	$KiriOSCClient.send_osc_message("/VMC/Ext/T", "t", [_get_timetag_for_current_time()])
 	
-func _prepare_bone_hierarchy_bundle(additional_packets: Array[PackedByteArray], model: Node3D, skeleton: Skeleton3D, model_controller: ModelController) -> PackedByteArray:
-	var bone_count = skeleton.get_bone_count()
+	
+func _prepare_bone_hierarchy_bundle(model: Node3D, skeleton: Skeleton3D, model_controller: ModelController) -> PackedByteArray:
+	#var bone_count = skeleton.get_bone_count()
 	var stack = []
 	var packets = []
 	
-	for additional_packet in additional_packets:
-		if len(additional_packet) > 0:
-			packets.append(additional_packet)
-	
 	# Initialize the stack with all root bones (bones with no parent)
-	for i in range(bone_count):
-		if skeleton.get_bone_parent(i) == -1:
-			stack.append(i)  # (bone_index, indent_level)
+	#for i in range(bone_count):
+		#if skeleton.get_bone_parent(i) == -1:
+			#stack.append(i)  # (bone_index, indent_level)
+	
+	for b in joint_names:
+		var found = model_controller.find_mapped_bone_index(b)
+		if found > -1:
+			stack.append(found)
 	
 	while stack.size() > 0:
 		var bone_index = stack.pop_back()
@@ -319,23 +381,28 @@ func _prepare_bone_hierarchy_bundle(additional_packets: Array[PackedByteArray], 
 		for child in children:
 			stack.append(child)
 		
-		# Skip processing root packet.
-		if bone_name.begins_with("root") or bone_name.begins_with("Root"):
-			continue
+		var address = "/VMC/Ext/Bone/Pos"
 		
-		var packet_res = _prepare_vmc_packet_for_bone("/VMC/Ext/Bone/Pos", bone_name, model, skeleton, model_controller)
+		# Adjust for root.
+		if bone_name.to_lower() == "root" || bone_name.to_lower() == "hips":
+			address = "/VMC/Ext/Root/Pos"
+			bone_name = "root"
+
+		var packet_res = _prepare_vmc_packet_for_bone(address, bone_name, bone_index, model, skeleton, model_controller)
 		if not packet_res[0]:
-			print("Cannot find Bone: %s %d", [bone_name, bone_index])
+			pass
+			#print("Cannot find bone: %s (idx: %d)", [bone_name, bone_index])
 		else:
 			packets.append(packet_res[1])
-			
+		
 	# Return the prepared bundle.
-	return $KiriOSCClient.create_osc_bundle(0, packets)	
+	var timetag = _get_timetag_for_current_time()
+	return $KiriOSCClient.create_osc_bundle(timetag, packets)
 	
-func _prepare_vmc_packet_for_bone(address: String, bone_name: String, 
-									model: Node3D, skeleton: Skeleton3D, 
+func _prepare_vmc_packet_for_bone(address: String,
+									bone_name: String, bone_index: int,
+									model: Node3D, skeleton: Skeleton3D,
 									model_controller: ModelController) -> Array:
-	
 	if bone_name == "root":
 		var pos = model.position
 		var quat = model.transform.basis.get_rotation_quaternion()
@@ -345,16 +412,49 @@ func _prepare_vmc_packet_for_bone(address: String, bone_name: String,
 			$KiriOSCClient.prepare_osc_message(address, "sfffffffffffff", 
 			[
 				bone_name, 
-				pos.x, pos.y, pos.z,
-				quat.x, quat.y, quat.z, quat.w,
+				# Unity works in flipped axis.
+				pos.x, pos.y * -1.0, pos.z * -1.0,
+				quat.x, quat.y * -1.0, quat.z * -1.0, quat.w,
 				scale.x, scale.y, scale.z,
 				0, 0, 0 # FIXME: Model root offset!
 			])
 		]
 	else:
-		var bone_trans = model_controller.get_bone_transform(bone_name)
+		var bone_trans = skeleton.get_bone_pose(bone_index)
 		if bone_trans == null:
 			return [false, null]
+		
+		var rot = bone_trans.basis.get_rotation_quaternion()
+		
+		var origin = Vector3(0.0, 0.0, 0.0)
+		
+		bone_trans = skeleton.get_bone_rest(bone_index) * \
+			Transform3D(
+				skeleton.get_bone_global_rest(bone_index).basis.get_rotation_quaternion()).inverse() * \
+			Transform3D(
+				Basis(rot),
+				origin) * \
+			Transform3D(
+				skeleton.get_bone_global_rest(bone_index).basis.get_rotation_quaternion())
+		
+		rot = bone_trans.basis.get_rotation_quaternion()
+				
+		match bone_name.to_lower():
+			"rightupperarm":
+				rot = Quaternion(rot.z, -rot.y, rot.x, rot.w).normalized()
+			#"leftupperarm":
+				#rot = Quaternion(-rot.z, -rot.y, rot.x, rot.w).normalized()
+			#_:
+				#rot = Quaternion(rot.x, -rot.y, -rot.z, rot.w).normalized()
+				
+		bone_trans.basis = Basis(rot)
+			
+		#var bone_parent = skeleton.get_bone_parent(bone_index)
+		#if bone_parent > -1:
+			#var parent_pose_global = skeleton.get_bone_global_pose(bone_parent)
+			#var global_to_local = parent_pose_global * skeleton.get_bone_rest(bone_index)
+			#bone_trans = global_to_local.affine_inverse() * bone_trans
+		
 		var trans: Vector3 = bone_trans.origin
 		var quat: Quaternion = bone_trans.basis.get_rotation_quaternion()
 		return [
@@ -366,4 +466,138 @@ func _prepare_vmc_packet_for_bone(address: String, bone_name: String,
 				quat.x, quat.y, quat.z, quat.w
 			])
 		]
+
+
+
 		
+		#var q: Quaternion = bone_trans.basis.get_rotation_quaternion()
+		##q.y *= -1.0
+		##q.z *= -1.0
+		#q = q.normalized()
+		#
+		#bone_trans = Transform3D(Basis(q), bone_trans.origin)
+		#
+		#var bone_parent = skeleton.get_bone_parent(bone_index)
+		#if bone_parent > -1:
+			#var parent_pose_global = skeleton.get_bone_global_pose(bone_parent)
+			#var local_trans = parent_pose_global * skeleton.get_bone_rest(bone_index)
+			#bone_trans = local_trans.affine_inverse() * bone_trans
+			#
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+		#var bone_to_global = skeleton.global_transform * bone_trans
+		#var axis_local = bone_to_global.basis.transposed()
+		
+		#bone_trans = Transform3D(axis_local, bone_trans.origin)
+		#var bone_parent = skeleton.get_bone_parent(bone_index)
+		#if bone_parent > -1:
+			#var parent_pose_global = skeleton.get_bone_global_pose(bone_parent)
+			#var global_to_local = parent_pose_global * skeleton.get_bone_rest(bone_index)
+			#bone_trans = global_to_local.affine_inverse() * bone_trans
+		
+		#var q: Quaternion = bone_trans.basis.get_rotation_quaternion()
+		#q.y *= -1.0
+		#q.z *= -1.0
+		#q = q.normalized()
+		
+		#bone_trans = Transform3D(Basis(q), bone_trans.origin)
+		
+		#bone_trans = skeleton.global_transform * bone_trans
+		
+		
+		
+		
+		
+		#var bone_trans = skeleton.get_bone_pose(bone_index)
+		#if bone_trans == null:
+			#return [false, null]
+		#
+		#var q: Quaternion = bone_trans.basis.get_rotation_quaternion()
+		##q.y *= -1.0
+		##q.z *= -1.0
+		##q = q.normalized()
+		#
+		
+		#var bone_parent = skeleton.get_bone_parent(bone_index)
+		#if bone_parent > -1:
+			#var parent_pose_global = skeleton.get_bone_global_pose(bone_parent)
+			#var local_trans = parent_pose_global * skeleton.get_bone_rest(bone_index)
+			#bone_trans = local_trans.affine_inverse() * bone_trans
+			#
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		#if bone_name != "RightShoulder":
+			#return [false, null]
+		
+		#var trans_vec: Vector3 = bone_trans.origin
+		#var quat: Quaternion = bone_trans.basis.get_rotation_quaternion()
+		#quat.y *= -1.0
+		#quat.z *= -1.0
+		#quat = quat.normalized()
+		
+		#var T1 = skeleton.get_bone_rest(bone_index)
+		#var T2 = Transform3D(skeleton.get_bone_global_rest(bone_index).basis.get_rotation_quaternion()).inverse()
+		#var T3 = bone_trans
+		#var T4 = Transform3D(skeleton.get_bone_global_rest(bone_index).basis.get_rotation_quaternion())
+
+		# Now, calculate the inverse transformation
+		#var new_transform : Transform3D = \
+		#	T1.inverse() * \
+		#	T2.inverse() * \
+			#T3.inverse() * \
+		#	T4.inverse()
+		#var new_transform : Transform3D = \
+				#skeleton.get_bone_rest(bone_index) * \
+				#Transform3D(
+					#skeleton.get_bone_global_rest(bone_index).basis.get_rotation_quaternion()) * \
+				#Transform3D(
+					#Basis(quat),
+					#trans_vec) * \
+				#Transform3D(
+					#skeleton.get_bone_global_rest(bone_index).basis.get_rotation_quaternion()).inverse()
+		
+		#var bone_euler = bone_trans.basis.get_euler()
+		#match bone_name.to_lower():
+			#"leftupperarm":
+				#bone_euler = Vector3(bone_euler.z, -bone_euler.y, bone_euler.x)
+			#"rightupperarm":
+				#bone_euler = Vector3(-bone_euler.z, -bone_euler.y, bone_euler.x)
+			#_:
+				#bone_euler = Vector3(bone_euler.x, -bone_euler.y, -bone_euler.z)
+		#
+		#var local_rest_pose = skeleton.get_bone_global_rest(bone_index)
+		#var rest_euler = local_rest_pose.basis.get_euler()
+		#
+		#var new_rot = Quaternion.from_euler(rest_euler) * Quaternion.from_euler(bone_euler)
+		#bone_trans = Transform3D(Basis(new_rot), bone_trans.origin)
+		#
+		#var new_trans_vec: Vector3 = Vector3(0.0, 0.0, 0.0) #bone_trans.origin
+		#var new_quat: Quaternion = bone_trans.basis.get_rotation_quaternion()
+		
+		#if vmc_send_mirrored_arms:
+			#if bone_name.begins_with("Left"):
+				#print("Replacing %s with %s" % [bone_name, "Right"])
+				#bone_name = bone_name.replace("Left", "Right")
+			#elif bone_name.begins_with("Right"):
+				#print("Replacing %s with %s" % [bone_name, "Left"])
+				#bone_name = bone_name.replace("Right", "Left")
+
+func _get_timetag_for_current_time() -> int:
+	return Time.get_unix_time_from_system() - ntp_start_unix

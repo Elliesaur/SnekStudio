@@ -92,6 +92,7 @@ item_1/id = 1
 size = Vector2i(603, 175)
 access = 2
 filters = PackedStringArray("*.json")
+use_native_dialog = true
 
 [node name="SettingsLoadDialog" type="FileDialog" parent="."]
 title = "Open a File"
@@ -99,6 +100,7 @@ ok_button_text = "Open"
 file_mode = 0
 access = 2
 filters = PackedStringArray("*.json")
+use_native_dialog = true
 
 [node name="VRMFileLoadDialog" type="FileDialog" parent="."]
 title = "Open a File"
@@ -107,6 +109,7 @@ ok_button_text = "Open"
 file_mode = 0
 access = 2
 filters = PackedStringArray("*.vrm")
+use_native_dialog = true
 
 [node name="LineEditFileDialog" type="FileDialog" parent="."]
 title = "Open a File"
@@ -115,6 +118,7 @@ file_mode = 0
 access = 2
 
 [node name="ModsWindow" parent="." instance=ExtResource("2_v48gv")]
+unique_name_in_owner = true
 visible = false
 offset_left = 247.0
 offset_top = 148.0
@@ -142,9 +146,9 @@ offset_left = 363.0
 offset_top = 255.0
 offset_right = 641.0
 offset_bottom = 512.0
-close_button_visible = true
 
 [node name="ChannelEvents" parent="." instance=ExtResource("7_0a1sx")]
+unique_name_in_owner = true
 visible = false
 offset_left = 664.0
 offset_top = 103.0
@@ -152,6 +156,7 @@ offset_right = 1088.0
 offset_bottom = 259.0
 
 [node name="SettingsWindow_Colliders" parent="." instance=ExtResource("2_m5fmr")]
+unique_name_in_owner = true
 visible = false
 offset_left = 308.0
 offset_top = 160.0
@@ -159,6 +164,7 @@ offset_right = 858.0
 offset_bottom = 491.0
 
 [node name="SettingsWindow_General" parent="." instance=ExtResource("4_kl5fl")]
+unique_name_in_owner = true
 visible = false
 offset_left = 281.0
 offset_top = 171.0
@@ -166,6 +172,7 @@ offset_right = 956.0
 offset_bottom = 484.0
 
 [node name="SettingsWindow_Sound" parent="." instance=ExtResource("2_22ujg")]
+unique_name_in_owner = true
 visible = false
 offset_left = 466.0
 offset_top = 225.0
@@ -173,6 +180,7 @@ offset_right = 744.0
 offset_bottom = 381.0
 
 [node name="SettingsWindow_Scene" parent="." instance=ExtResource("10_7flul")]
+unique_name_in_owner = true
 visible = false
 offset_left = 241.0
 offset_top = 206.0
@@ -180,6 +188,7 @@ offset_right = 859.0
 offset_bottom = 497.0
 
 [node name="SettingsWindow_Window" parent="." instance=ExtResource("11_5qt8l")]
+unique_name_in_owner = true
 visible = false
 offset_left = 390.0
 offset_top = 214.0

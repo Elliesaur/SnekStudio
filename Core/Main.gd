@@ -523,6 +523,13 @@ func save_settings(path : String = ""):
 	if settings_filename == "":
 		settings_filename = _get_default_settings_path()
 	
+	# Create settings directory if it doesn't already exist
+	var settings_dir = ProjectSettings.globalize_path(settings_filename.get_basename())
+	if not DirAccess.dir_exists_absolute(settings_dir):
+		if DirAccess.make_dir_recursive_absolute(settings_dir) != OK:
+			push_error("Failed to create settings directory: " + settings_dir)
+			return
+	
 	# Convert settings to JSON and save.
 	var save_string = JSON.stringify(settings_to_save, "  ")
 	var file = FileAccess.open(settings_filename, FileAccess.WRITE)
@@ -601,7 +608,6 @@ func load_vrm(path) -> bool:
 		return false
 
 	# Load colliders list
-	var model_base_name : String = _get_current_model_base_name()
 	var collider_data : Array = get_colliders(true)
 
 	# Clear "from_vrm" from everything loaded because we'll correlate

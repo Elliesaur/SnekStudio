@@ -6,6 +6,7 @@ var vmc_receiver_enabled : bool = false
 var client_ip_address : String = "127.0.0.2"
 var client_port : int = 39539
 var vmc_sender_enabled : bool = false
+var vrc_sender_enabled : bool = false
 var vmc_send_mirrored_arms : bool = false
 var client_send_rate_limit_ms : int = 50
 var client_vmc_protocl_version_setting : Array
@@ -73,7 +74,11 @@ var joint_names = [
 	"RightLittleIntermediate",
 	"RightLittleDistal"
 ]
-
+var vrc_joint_names = [
+	"Hips",
+	"Chest",
+	"Head",
+]
 func _ready():
 	ntp_start_date = Time.get_datetime_dict_from_datetime_string("1900-01-01T00:00:00Z", false)
 	ntp_start_unix = Time.get_unix_time_from_datetime_dict(ntp_start_date)
@@ -81,10 +86,12 @@ func _ready():
 	add_setting_group("vmc_receiving", "VMC Receiving")
 	add_setting_group("vmc_sending", "VMC Sending")
 	
+	# VMC Receiving
 	add_tracked_setting("bind_ip_address", "Receiver IP address", {}, "vmc_receiving")
 	add_tracked_setting("bind_port", "Receiver port", {}, "vmc_receiving")
 	add_tracked_setting("vmc_receiver_enabled", "Receiver enabled", {}, "vmc_receiving")
 	
+	# VMC Sending
 	add_tracked_setting("client_ip_address", "Sender IP address", {}, "vmc_sending")
 	add_tracked_setting("client_port", "Sender port", {}, "vmc_sending")
 	add_tracked_setting("client_send_rate_limit_ms", "Send rate (ms)", {}, "vmc_sending")
@@ -95,7 +102,9 @@ func _ready():
 		}, "vmc_sending")
 	add_tracked_setting("vmc_send_mirrored_arms", "Send mirrored arms", {}, "vmc_sending")
 	add_tracked_setting("vmc_sender_enabled", "Sender enabled", {}, "vmc_sending")
-	
+	# FIXME: New grouping for VRChat Sending
+	add_tracked_setting("vrc_sender_enabled", "VRChat sender enabled", {}, "vmc_sending")
+
 	update_settings_ui()
 
 func load_after(_settings_old : Dictionary, _settings_new : Dictionary):
@@ -316,11 +325,120 @@ func _on_OSCServer_message_received(address_string, arguments):
 func _process(delta: float) -> void:
 	
 	# Process sending of VMC data.
-	if vmc_sender_enabled:
+	if vmc_sender_enabled or vrc_sender_enabled:
 		curr_client_send_time += delta
 		if curr_client_send_time > client_send_rate_limit_ms / 1000:
 			curr_client_send_time = 0
-			_handle_vmc_sending()
+			if vmc_sender_enabled:
+				_handle_vmc_sending()
+			if vrc_sender_enabled:
+				_handle_vrc_sending()
+		
+func _handle_vrc_sending() -> void:
+	var model : Node3D = get_app().get_model()
+	var skeleton : Skeleton3D = get_app().get_skeleton()
+	var model_controller : ModelController = get_app().get_node("ModelController")
+	var stack = []
+	
+	var blend_shapes = model_controller.get_blend_shape_values()
+	if "eyeBlinkLeft" in blend_shapes:
+		$KiriOSCClient.send_osc_message("/tracking/eye/EyesClosedAmount", "f", [blend_shapes["eyeBlinkLeft"]])
+	
+	for b in vrc_joint_names:
+		var found = model_controller.find_mapped_bone_index(b)
+		if found > -1:
+			stack.append(found)
+	
+	while stack.size() > 0:
+		var bone_index = stack.pop_back()
+		var bone_name = skeleton.get_bone_name(bone_index)
+
+		#var children = skeleton.get_bone_children(bone_index)
+		#for child in children:
+			#stack.append(child)
+		
+
+		var bone_trans = skeleton.get_bone_pose(bone_index)
+		if bone_trans == null:
+			continue
+		
+		var rot = bone_trans.basis.get_rotation_quaternion()
+		
+		var origin = Vector3(0.0, 0.0, 0.0)
+		
+		var scale_factor = 1.74 / 0.87
+		
+		var eul : Vector3 = bone_trans.basis.get_euler()
+		
+		if bone_name.to_lower() == "head":
+			$KiriOSCClient.send_osc_message("/tracking/trackers/head/rotation", "fff", [
+				eul.x * 100.0,
+				eul.y * 100.0,
+				eul.z * -1 * 100.0
+			])
+			#$KiriOSCClient.send_osc_message("/tracking/trackers/head/position", "fff", [
+				#origin.x,
+				#origin.y,
+				#origin.z
+			#])
+		else:
+			continue
+		#bone_trans = skeleton.get_bone_rest(bone_index) * \
+			#Transform3D(
+				#skeleton.get_bone_global_rest(bone_index).basis.get_rotation_quaternion()).inverse() * \
+			#Transform3D(
+				#Basis(rot),
+				#origin) * \
+			#Transform3D(
+				#skeleton.get_bone_global_rest(bone_index).basis.get_rotation_quaternion())
+		#
+		#rot = bone_trans.basis.get_rotation_quaternion()
+				#
+		#match bone_name.to_lower():
+			#"rightupperarm":
+				#rot = Quaternion(rot.z, -rot.y, rot.x, rot.w).normalized()
+			##"leftupperarm":
+				##rot = Quaternion(-rot.z, -rot.y, rot.x, rot.w).normalized()
+			##_:
+				##rot = Quaternion(rot.x, -rot.y, -rot.z, rot.w).normalized()
+				#
+		#bone_trans.basis = Basis(rot)
+			#
+		##var bone_parent = skeleton.get_bone_parent(bone_index)
+		##if bone_parent > -1:
+			##var parent_pose_global = skeleton.get_bone_global_pose(bone_parent)
+			##var global_to_local = parent_pose_global * skeleton.get_bone_rest(bone_index)
+			##bone_trans = global_to_local.affine_inverse() * bone_trans
+		#
+		#var trans: Vector3 = bone_trans.origin
+		#var quat: Quaternion = bone_trans.basis.get_rotation_quaternion()
+		#
+		# Adjust for root.
+		
+			
+		
+	#
+	#for key in blend_shapes.keys():
+		#var val = blend_shapes[key]
+		#var address = "/avatar/parameters/"
+		#if key == "jawOpen":
+			#address += "MouthOpen"
+			## Inverse it for mouth open.
+			##val = (val - 1) * -1
+		#if key == "eyeBlinkLeft":
+			#address += "Blink"
+		#if key == "browDownLeft":
+			#address += "BrowsDownUp"
+		#if key == "mouthFunnel":
+			#address += "MouthWideNarrow"
+			#
+		#if address == "/avatar/parameters/":
+			#continue
+		#
+		##$KiriOSCClient.send_osc_message("/VMC/Ext/OK", "i", [1])
+		#$KiriOSCClient.send_osc_message(address, "f", [val])
+	
+		
 		
 func _handle_vmc_sending() -> void:
 	#print_log("Sending VMC Data")

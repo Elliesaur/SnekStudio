@@ -934,7 +934,7 @@ func mirror_parsed_data(parsed_data : Dictionary) -> Dictionary:
 
 	return new_parsed_data
 
-func _process_single_packet(model : Node3D, delta : float, parsed_data : Dictionary):
+func _process_single_packet(model : Node3D, model_controller : ModelController, delta : float, parsed_data : Dictionary):
 
 	if "status" in parsed_data:
 		set_status(parsed_data["status"])
@@ -1046,12 +1046,15 @@ func _process_single_packet(model : Node3D, delta : float, parsed_data : Diction
 			shape_dict_new = functions_blendshapes.apply_rest_shapes(
 				blend_shape_last_values, delta, blend_to_rest_speed)
 
+		# Update the blend shapes stored in the model controller.
+		model_controller.set_blend_shape_values(shape_dict_new)
+		
 		functions_blendshapes.apply_animations(
 			model, shape_dict_new)
 
 		blend_shape_last_values = shape_dict_new
 
-func process_new_packets(model, delta):
+func process_new_packets(model: Node3D, model_controller: ModelController, delta):
 	var most_recent_packet = null
 	var dropped_packets = 0
 
@@ -1068,7 +1071,7 @@ func process_new_packets(model, delta):
 
 		if parsed_data:
 			last_packet_received = parsed_data.duplicate(true)
-			_process_single_packet(model, delta, parsed_data)
+			_process_single_packet(model, model_controller, delta, parsed_data)
 
 		if len(packet) > 0:
 			if most_recent_packet != null:
@@ -1080,7 +1083,7 @@ func process_new_packets(model, delta):
 	# FIXME: Kind of a hack. Reprocess last parsed data again so that smoothing
 	#   can continue even in the lack of actual input.
 	if not most_recent_packet and last_packet_received:
-		_process_single_packet(model, delta, last_packet_received.duplicate(true))
+		_process_single_packet(model, model_controller, delta, last_packet_received.duplicate(true))
 
 	if dropped_packets > 0:
 		if dropped_packets <= 2:
@@ -1156,7 +1159,8 @@ func _process(delta):
 		return
 
 	var model_root = get_model()
-	if not model_root:
+	var model_controller = get_model_controller()
+	if not model_root or not model_controller:
 		return
 
 
@@ -1187,7 +1191,7 @@ func _process(delta):
 			model_pos.y, head_pos.y - head_rest_transform.origin.y + head_vertical_offset,
 			clamp(hips_vertical_blend_speed * delta, 0.0, 1.0))
 
-	process_new_packets(model_root, delta)
+	process_new_packets(model_root, model_controller, delta)
 
 	var delta_scale = delta * 60.0
 	if delta_scale > 1.0:

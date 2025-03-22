@@ -386,6 +386,10 @@ func get_model() -> Node3D:
 	var controller = get_app().get_node("ModelController")
 	return controller.get_node_or_null("Model")
 
+func get_model_controller() -> ModelController:
+	# FIXME (multiplayer): Return the specific model controller for the current model.
+	return get_app().get_node_or_null("ModelController")
+	
 func get_bone_transform(bone_name) -> Transform3D:
 	var skeleton = get_skeleton()
 	if skeleton:

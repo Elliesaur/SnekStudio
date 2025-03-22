@@ -2,6 +2,7 @@ extends Node3D
 class_name ModelController
 
 var _last_loaded_vrm = ""
+var _blend_shape_dict : Dictionary = {}
 
 func _set_lod_bias_recursively(node):
 	if node is MeshInstance3D:
@@ -166,3 +167,10 @@ func reset_blend_shapes() -> void:
 	anim_player.play("RESET")
 	anim_player.advance(0)
 	anim_player.stop()
+
+## Stores blend shape values for model.
+func set_blend_shape_values(shape_dict : Dictionary) -> void:
+	_blend_shape_dict = shape_dict
+
+func get_blend_shape_values() -> Dictionary:
+	return _blend_shape_dict
